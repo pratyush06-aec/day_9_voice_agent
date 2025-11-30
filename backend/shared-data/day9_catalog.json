@@ -1,0 +1,26 @@
+[
+  {
+    "id": "mug-001",
+    "name": "Stoneware Coffee Mug",
+    "price": 800,
+    "currency": "INR",
+    "category": "mug",
+    "color": "white"
+  },
+  {
+    "id": "mug-002",
+    "name": "Blue Ceramic Mug",
+    "price": 950,
+    "currency": "INR",
+    "category": "mug",
+    "color": "blue"
+  },
+  {
+    "id": "hoodie-001",
+    "name": "Black Cotton Hoodie",
+    "price": 1499,
+    "currency": "INR",
+    "category": "hoodie",
+    "color": "black"
+  }
+]
