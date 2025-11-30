@@ -1,214 +1,197 @@
-# AI Voice Agents Challenge - Starter Repository
+Day 9 — E-commerce Agent (Agentic Commerce Protocol — Lite)
 
-Welcome to the **AI Voice Agents Challenge** by [murf.ai](https://murf.ai)!
+A voice-driven shopping assistant inspired by a slimmed-down Agentic Commerce Protocol (ACP).
+The agent interprets spoken shopping intent, calls a small merchant layer (Python functions) to browse a catalog and create orders, and persists orders to JSON. Built on the same realtime stack (LiveKit, STT, LLM, TTS) used in prior days.
 
-## About the Challenge
+TL;DR — What this repo does
 
-We just launched **Murf Falcon** – the consistently fastest TTS API, and you're going to be among the first to test it out in ways never thought before!
+Loads a small product catalog (JSON).
 
-**Build 10 AI Voice Agents over the course of 10 Days** along with help from our devs and the community champs, and win rewards!
+Lets users explore products by voice (filters: category, max_price, color, etc.).
 
-### How It Works
+Lets users place orders by voice; the agent calls create_order() which persists orders to JSON.
 
-- One task to be provided everyday along with a GitHub repo for reference
-- Build a voice agent with specific personas and skills
-- Post on GitHub and share with the world on LinkedIn!
+Keeps per-session order state in ctx.userdata.
 
-## Repository Structure
+Provides LLM-callable tools (list_products_tool, create_order_tool, get_last_order_tool) so the LLM drives the flow by calling functions (not embedding commerce logic in prompts).
 
-This is a **monorepo** that contains both the backend and frontend for building voice agent applications. It's designed to be your starting point for each day's challenge task.
+Stores orders in shared-data/day9_orders.json (or per-order files, whichever you prefer).
 
-```
-falcon-tdova-nov25-livekit/
-├── backend/          # LiveKit Agents backend with Murf Falcon TTS
-├── frontend/         # React/Next.js frontend for voice interaction
-├── start_app.sh      # Convenience script to start all services
-└── README.md         # This file
-```
+Why ACP-inspired?
 
-### Backend
+ACP is an architecture pattern for separating conversation (LLM/voice) from commerce logic (catalog/order APIs). This project borrows that separation: the LLM asks the agent to call merchant functions; the merchant layer (Python) is authoritative for product lookup and order creation.
 
-The backend is based on [LiveKit's agent-starter-python](https://github.com/livekit-examples/agent-starter-python) with modifications to integrate **Murf Falcon TTS** for ultra-fast, high-quality voice synthesis.
+Files & important paths
+backend/
+  src/
+    agent.py            # voice agent (LLM + tools)
+    merchant.py         # merchant API: load_catalog, list_products, create_order, save_order
+shared-data/
+  day9_catalog.json     # your product catalog (you create/edit)
+  day9_orders.json      # orders appended here by merchant.save_order()
+frontend/
+  ...                   # UI (optional) to join LiveKit room and speak
+  Example day9_catalog.json
 
-**Features:**
+Create shared-data/day9_catalog.json with at least 10 items (small but diverse).
 
-- Complete voice AI agent framework using LiveKit Agents
-- Murf Falcon TTS integration for fastest text-to-speech
-- LiveKit Turn Detector for contextually-aware speaker detection
-- Background voice cancellation
-- Integrated metrics and logging
-- Complete test suite with evaluation framework
-- Production-ready Dockerfile
+[
+  {
+    "id": "mug-001",
+    "name": "Stoneware Coffee Mug",
+    "description": "Handmade 12oz stoneware mug",
+    "price": 499,
+    "currency": "INR",
+    "category": "mugs",
+    "color": "white"
+  },
+  {
+    "id": "hoodie-black-m",
+    "name": "Cozy Hoodie (Black, M)",
+    "description": "Medium, cotton-blend hoodie",
+    "price": 1199,
+    "currency": "INR",
+    "category": "clothing",
+    "color": "black",
+    "size": "M"
+  }
+  // add 8–20 items total
+]
 
-[→ Backend Documentation](./backend/README.md)
+Merchant layer (example: backend/src/merchant.py)
 
-### Frontend
+The merchant layer is a tiny Python API that the agent calls.
 
-The frontend is based on [LiveKit's agent-starter-react](https://github.com/livekit-examples/agent-starter-react), providing a modern, beautiful UI for interacting with your voice agents.
+Key functions:
 
-**Features:**
+load_catalog() → returns list[dict]
 
-- Real-time voice interaction with LiveKit Agents
-- Camera video streaming support
-- Screen sharing capabilities
-- Audio visualization and level monitoring
-- Light/dark theme switching
-- Highly customizable branding and UI
+list_products(filters: dict|None) → returns filtered list (category, max_price, color)
 
-[→ Frontend Documentation](./frontend/README.md)
+create_order(line_items: list[dict]) → builds an order object, persists it, returns order
 
-## Quick Start
+Example shape of order returned by create_order:
 
-### Prerequisites
+{
+  "id": "order-1700000000",
+  "items": [
+    {"id":"mug-001","name":"Stoneware Coffee Mug","price":499,"quantity":1}
+  ],
+  "total": 499,
+  "currency": "INR",
+  "created_at": "2025-11-30T12:00:00Z"
+}
+Agent changes (what backend/src/agent.py should do)
 
-Make sure you have the following installed:
+Import merchant functions:
 
-- Python 3.9+ with [uv](https://docs.astral.sh/uv/) package manager
-- Node.js 18+ with pnpm
-- [LiveKit CLI](https://docs.livekit.io/home/cli/cli-setup) (optional but recommended)
-- [LiveKit Server](https://docs.livekit.io/home/self-hosting/local/) for local development
+from merchant import load_catalog, list_products, create_order
 
-### 1. Clone the Repository
 
-```bash
-git clone <your-repo-url>
-cd falcon-tdova-nov25-livekit
-```
+At entrypoint() load the catalog and place it in session userdata:
 
-### 2. Backend Setup
+catalog = load_catalog()
+session = AgentSession(..., userdata={"catalog": catalog, "last_order": None, "last_products": []})
 
-```bash
-cd backend
 
-# Install dependencies
-uv sync
+Add LLM-callable tools inside the Assistant class (use @function_tool()):
 
-# Copy environment file and configure
-cp .env.example .env.local
+list_products_tool(ctx, filters: dict | None = None) — calls list_products(filters), stores ctx.userdata["last_products"], returns the products
 
-# Edit .env.local with your credentials:
-# - LIVEKIT_URL
-# - LIVEKIT_API_KEY
-# - LIVEKIT_API_SECRET
-# - MURF_API_KEY (for Falcon TTS)
-# - GOOGLE_API_KEY (for Gemini LLM)
-# - DEEPGRAM_API_KEY (for Deepgram STT)
+create_order_tool(ctx, product_id: str, quantity: int = 1) — calls create_order(...), stores ctx.userdata["last_order"], returns order
 
-# Download required models
-uv run python src/agent.py download-files
-```
+get_last_order_tool(ctx) — returns ctx.userdata.get("last_order")
 
-For LiveKit Cloud users, you can automatically populate credentials:
+Instruction prompt (GM for commerce): make agent ask clarifying questions ("Which size?", "Confirm order?") and call the tools (LLM should call them; your function tools make that possible).
 
-```bash
-lk cloud auth
-lk app env -w -d .env.local
-```
+Why function tools: keeping catalog/order logic in merchant.py and exposing only well-typed functions prevents the LLM from inventing product details and keeps data authoritative.
+Conversation flow examples
+Browse
 
-### 3. Frontend Setup
+User: “Show me coffee mugs under 600.”
+Agent (LLM) calls list_products_tool({"category":"mugs", "max_price":600}) → tool returns list → agent speaks summary: “I found 2 mugs: Stoneware Coffee Mug — ₹499; Classic Ceramic Mug — ₹549. Want either?”
 
-```bash
-cd frontend
+Buy
 
-# Install dependencies
-pnpm install
+User: “I’ll take the stoneware mug.”
+Agent resolves product ID (using last_products or by name matching), then calls create_order_tool(product_id="mug-001", quantity=1) → receives order → confirms: “Order placed: 1 × Stoneware Coffee Mug. Total ₹499. Order ID order-170... Would you like a receipt?”
 
-# Copy environment file and configure
-cp .env.example .env.local
+What did I buy?
 
-# Edit .env.local with the same LiveKit credentials
-```
+User: “What did I just buy?”
+Agent calls get_last_order_tool() → reads back items and total.
 
-### 4. Run the Application
+How to run (local dev)
 
-#### Install livekit server
+Prereqs: Python 3.10+ (project venv), Node (if frontend), set .env.local keys for LiveKit, Murf, STT/LLM providers if needed.
 
-```bash
-brew install livekit
-```
+Backend
 
-You have two options:
+Create & activate venv, install Python deps:
 
-#### Option A: Use the convenience script (runs everything)
+python -m venv .venv
+# Windows
+.venv\Scripts\activate
+# Mac/Linux
+source .venv/bin/activate
 
-```bash
-# From the root directory
-chmod +x start_app.sh
-./start_app.sh
-```
+pip install -r backend/requirements.txt
 
-This will start:
 
-- LiveKit Server (in dev mode)
-- Backend agent (listening for connections)
-- Frontend app (at http://localhost:3000)
+Ensure shared-data/day9_catalog.json exists.
 
-#### Option B: Run services individually
+Run the agent worker:
 
-```bash
-# Terminal 1 - LiveKit Server
-livekit-server --dev
-
-# Terminal 2 - Backend Agent
-cd backend
 uv run python src/agent.py dev
 
-# Terminal 3 - Frontend
+
+This starts a worker that will register with LiveKit and handle room joins.
+
+Frontend (optional)
+
+If the repo has a frontend (LiveKit web UI):
+
 cd frontend
-pnpm dev
-```
+npm install
+npm run dev
+# open http://localhost:3000 (or the port printed)
 
-Then open http://localhost:3000 in your browser!
 
-## Daily Challenge Tasks
+Then join the LiveKit room (UI should be wired to the repo's front end) and speak to the agent.
 
-Each day, you'll receive a new task that builds upon your voice agent. The tasks will help you:
+Development & testing tips
 
-- Implement different personas and conversation styles
-- Add custom tools and capabilities
-- Integrate with external APIs
-- Build domain-specific agents (customer service, tutoring, etc.)
-- Optimize performance and user experience
+If the LLM returns ambiguous product references (“the second one”), keep ctx.userdata["last_products"] populated so the agent can resolve “the second” reliably.
 
-**Stay tuned for daily task announcements!**
+Add defensive checks in create_order: if product_id not found return a friendly error; LLM can then ask user to clarify.
 
-## Documentation & Resources
+Log all calls in merchant.py (use logging.info) so you can trace which products were requested and which orders were created.
 
-- [Murf Falcon TTS Documentation](https://murf.ai/api/docs/text-to-speech/streaming)
-- [LiveKit Agents Documentation](https://docs.livekit.io/agents)
-- [Original Backend Template](https://github.com/livekit-examples/agent-starter-python)
-- [Original Frontend Template](https://github.com/livekit-examples/agent-starter-react)
+For offline testing without LiveKit, you can write a small python test harness that calls list_products() and create_order() directly.
+Minimal unit tests suggestions
 
-## Testing
+Test merchant.load_catalog() reads JSON and returns list.
 
-The backend includes a comprehensive test suite:
+Test list_products filters correctly (category, max_price, color).
 
-```bash
-cd backend
-uv run pytest
-```
+Test create_order returns order with correct total and persists to day9_orders.json.
 
-Learn more about testing voice agents in the [LiveKit testing documentation](https://docs.livekit.io/agents/build/testing/).
+Use pytest in backend/tests/.
+MVP Checklist
 
-## Contributing & Community
+ day9_catalog.json exists and contains 10+ items
 
-This is a challenge repository, but we encourage collaboration and knowledge sharing!
+ merchant.py contains load_catalog, list_products, create_order, save_order
 
-- Share your solutions and learnings on GitHub
-- Post about your progress on LinkedIn
-- Join the [LiveKit Community Slack](https://livekit.io/join-slack)
-- Connect with other challenge participants
+ agent.py loads catalog into session userdata
 
-## License
+ Tools implemented: list_products_tool, create_order_tool, get_last_order_tool
 
-This project is based on MIT-licensed templates from LiveKit and includes integration with Murf Falcon. See individual LICENSE files in backend and frontend directories for details.
+ Orders persisted to shared-data/day9_orders.json
 
-## Have Fun!
+ Agent can summarize products and confirm orders
 
-Remember, the goal is to learn, experiment, and build amazing voice AI agents. Don't hesitate to be creative and push the boundaries of what's possible with Murf Falcon and LiveKit!
+ Agent can read back the last order
 
-Good luck with the challenge!
 
----
-
-Built for the AI Voice Agents Challenge by murf.ai
+ #VoiceAI #AgenticCommerce #ACP #LiveKit #MurfAI #Gemini #STT #TTS #Ecommerce #BuildInPublic #Day9 #10DaysofAIVoiceAgents
